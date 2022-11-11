@@ -180,7 +180,7 @@ class HopperCombinedEnv(gym.Env):
         self._p.stepSimulation()
         self.past_obs_array.clear()
         self.past_bact_array.clear()
-
+        # Here the NN is used to extend the observation
         self.update_extended_observation()
 
         return self.obs
@@ -193,11 +193,13 @@ class HopperCombinedEnv(gym.Env):
         return list(self.past_obs_array) + list(self.past_bact_array)
 
     def step(self, a):
-        if self.train_dyn:
+        # Env_action: an array for the simulator parameters. During training of dynamics it equals 'a' else it is created by the dyn_actor_critic.
+        # robo_action: either sampled from trajectory if training sim. Or 'a' if refining policy
+        if self.train_dyn: # Training the simulator parameters
             # in hopper case, env_action is 7D, state-dependent contact coeffs (4D) and battery level (3D)
             env_action = a
             robo_action = np.array(self.past_bact_array[0])       # after tanh
-        else:
+        else: # Policy refinement on fixed simulator
             robo_action = a
             robo_action = np.tanh(robo_action)
             # update past_bact after tanh
@@ -209,10 +211,14 @@ class HopperCombinedEnv(gym.Env):
             env_pi_obs_nn = utils.wrap(env_pi_obs, is_cuda=self.cuda_env)
 
             ind = self.np_random.choice(len(self.dyn_actor_critics))
+            # Gijs: We select from multiple dynamic networks. The set are the models saved during training at iterations: 80,100,120,140,160
+            #  I think it is used to provide some randomness.
+            #  Also note that deterministic is set to false here. Which means its already doing some domain randomization since it sampling from the PPO distribution
             with torch.no_grad():
                 _, env_action_nn, _, self.recurrent_hidden_states = self.dyn_actor_critics[ind].act(
                     env_pi_obs_nn, self.recurrent_hidden_states, self.masks, deterministic=False
                 )
+            # Env_action is created using the function dyn_actor_critics(past_obs, robo_action)
             env_action = utils.unwrap(env_action_nn, is_cuda=self.cuda_env)
 
         if self.act_noise:
@@ -225,8 +231,10 @@ class HopperCombinedEnv(gym.Env):
         _, dq_old = self.robot.get_q_dq(self.robot.ctrl_dofs)
 
         for _ in range(self.control_skip):
-            self.robot.apply_action(robo_action)
+            self.robot.apply_action(robo_action) # This looks to be redundant. Since line below overwrites the attributes.
             # self.apply_scale_clip_conf_from_pi_easy(env_action)
+            # GIJS: Here the dynamics are changed using env_action!
+            #  It changes pybullet dynamics and also returns a smaller array of battery levels which reduce or increase the action.
             battery_levels = self.set_con_coeff_and_return_battery_level(env_action)
             self.robot.apply_action(robo_action * battery_levels)
             self._p.stepSimulation()
@@ -234,14 +242,17 @@ class HopperCombinedEnv(gym.Env):
                 time.sleep(self._ts * 0.5)
             self.timer += 1
         self.robot.update_x()
+        # New observation is used to create the action with the behaviour policy for the next iteration. Used when training the simulator
         self.update_extended_observation()
         past_info += [self.past_obs_array[0]]  # s_t+1
 
         obs_unnorm = np.array(self.past_obs_array[0]) / self.robot.obs_scaling
 
+        #Gijs: Below is mostly to refine the policy
         reward = 3.0  # alive bonus
         reward += self.get_ave_dx()
         # print("v", self.get_ave_dx())
+        # Gijs: Used to reduce energy use of motors
         reward += -0.5 * np.square(robo_action).sum()
         # print("act norm", -0.5 * np.square(robo_action).sum())
 

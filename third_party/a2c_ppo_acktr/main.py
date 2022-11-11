@@ -66,6 +66,7 @@ def main():
     device = torch.device("cuda:0" if args.cuda else "cpu")
     Tensor = torch.cuda.FloatTensor if args.cuda else torch.FloatTensor
 
+    # processes = ~8
     envs = make_vec_envs(args.env_name, args.seed, args.num_processes,
                          args.gamma, args.log_dir, device, False, render=False, **extra_dict)
 
@@ -119,7 +120,7 @@ def main():
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(log_formatter)
     root_logger.addHandler(console_handler)
-
+    # Gijs: PPO is default
     if args.algo == 'a2c':
         agent = algo.A2C_ACKTR(
             actor_critic,
@@ -206,7 +207,7 @@ def main():
 
         for step in range(args.num_steps):
             # print(args.num_steps) 300*8
-            # Sample actions
+            # Sample actions.
             with torch.no_grad():
                 value, action, action_log_prob, recurrent_hidden_states = actor_critic.act(
                     rollouts.obs[step, :args.num_processes, :],

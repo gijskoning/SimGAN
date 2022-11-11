@@ -63,6 +63,7 @@ def main():
 
     torch.set_num_threads(1)
     device = torch.device("cuda:0" if args.cuda else "cpu")
+    print("Device:", device)
     Tensor = torch.cuda.FloatTensor if args.cuda else torch.FloatTensor
 
     envs = make_vec_envs(args.env_name, args.seed, args.num_processes,
@@ -206,6 +207,7 @@ def main():
                 agent.optimizer, j, num_updates,
                 agent.optimizer.lr if args.algo == "acktr" else args.lr)
 
+        # Performing rollouts
         for step in range(args.num_steps):
             # print(args.num_steps) 300*8
             # Sample actions
